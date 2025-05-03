@@ -7,12 +7,12 @@ import gradio as gr
 from PIL import Image
 from scripts.aura_sr import AuraSR
 
-def upscale(imageSource, *args):
+def upscale(imageSource, scale_factor, *args):
     torch.set_grad_enabled(False)
 
     if imageSource != None:
         aura_sr = AuraSR.from_pretrained("fal/AuraSR-v2")
-        upscaledImage = aura_sr.upscale_4x_overlapped(imageSource)
+        upscaledImage = aura_sr.upscale_overlapped(imageSource, scale_factor)
         
         del aura_sr
     else:
@@ -43,6 +43,12 @@ def on_ui_tabs():
             with gr.Column():
                 #show image dimensions?
                 imageSource = gr.Image(label='image source', sources=['upload'], height=640, type='pil', interactive=True, show_download_button=False, )
+                scale_factor = gr.Dropdown(
+                    choices=['2x', '3x', '4x', '5x', '6x'],
+                    value='4x',
+                    label='Scaling Factor',
+                    show_label=True
+                )
                 go_button = gr.Button(value="Upscale", variant='primary', visible=True)
 
             with gr.Column():
@@ -53,7 +59,7 @@ def on_ui_tabs():
                     save_button = gr.Button(value='Save', variant='secondary')
 
         go_button.click(toggleGo, inputs=[], outputs=[go_button])
-        go_button.click(upscale, inputs=imageSource, outputs=[go_button, outputImage])
+        go_button.click(upscale, inputs=[imageSource, scale_factor], outputs=[go_button, outputImage])
 
         save_button.click(fn=saveImage, inputs=[outputImage, filename], outputs=[])
 

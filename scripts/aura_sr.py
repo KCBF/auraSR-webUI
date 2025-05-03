@@ -953,3 +953,65 @@ class AuraSR:
 
         to_pil = transforms.ToPILImage()
         return to_pil(unpadded)
+
+    @torch.no_grad()
+    def upscale_overlapped(self, image, scale_factor='4x', max_batch_size=8, weight_type='checkboard'):
+        # Convert scale factor from string (e.g., '4x') to integer
+        scale = int(scale_factor.replace('x', ''))
+        
+        tensor_transform = transforms.ToTensor()
+        device = self.upsampler.device
+
+        image_tensor = tensor_transform(image).unsqueeze(0)
+        _, _, h, w = image_tensor.shape
+
+        # Calculate paddings
+        pad_h = (
+            self.input_image_size - h % self.input_image_size
+        ) % self.input_image_size
+        pad_w = (
+            self.input_image_size - w % self.input_image_size
+        ) % self.input_image_size
+
+        # Pad the image
+        image_tensor = torch.nn.functional.pad(
+            image_tensor, (0, pad_w, 0, pad_h), mode="reflect"
+        ).squeeze(0)
+
+        # Calculate the target size based on scale factor
+        target_size = self.input_image_size * scale
+        
+        # Tile the image
+        tiles, h_chunks, w_chunks = tile_image(image_tensor, self.input_image_size)
+        
+        # Process tiles in batches
+        num_tiles = len(tiles)
+        batches = [tiles[i:i + max_batch_size] for i in range(0, num_tiles, max_batch_size)]
+        reconstructed_tiles = []
+
+        for batch in batches:
+            model_input = torch.stack(batch).to(device)
+            generator_output = self.upsampler(
+                lowres_image=model_input,
+                noise=torch.randn(model_input.shape[0], 128, device=device)
+            )
+            
+            # Resize the output to the target scale
+            if scale != 4:  # If not 4x, resize the output
+                generator_output = F.interpolate(
+                    generator_output,
+                    size=(target_size, target_size),
+                    mode='bilinear',
+                    align_corners=False
+                )
+            
+            reconstructed_tiles.extend(list(generator_output.clamp_(0, 1).detach().cpu()))
+
+        # Merge tiles with the new target size
+        merged_tensor = merge_tiles(reconstructed_tiles, h_chunks, w_chunks, target_size)
+        
+        # Remove padding
+        unpadded = merged_tensor[:, :h * scale, :w * scale]
+
+        to_pil = transforms.ToPILImage()
+        return to_pil(unpadded)
